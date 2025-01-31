@@ -1,5 +1,6 @@
 #the binary itself
 src/imafix2
+src/evmctl
 
 # Prerequisites
 *.d

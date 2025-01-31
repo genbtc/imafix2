@@ -64,7 +64,7 @@
 #include <openssl/err.h>
 #include <openssl/rsa.h>
 #include <openssl/engine.h>
-#include "hash_info.h"
+//#include "hash_info.h"
 #include "pcr.h"
 #include "utils.h"
 
@@ -1750,6 +1750,7 @@ static struct tpm_bank_info *init_tpm_banks(int *num_banks)
 	if (!banks)
 		return banks;
 
+#ifdef TPM2_HAS_BEEN_DISABLED
 	/* re-calculate the PCRs digests for only known algorithms */
 	*num_banks = num_algos;
 	for (i = 0; i < num_algos; i++) {
@@ -1758,6 +1759,7 @@ static struct tpm_bank_info *init_tpm_banks(int *num_banks)
 				set_bank_info(&banks[i], hash_algo_name[j]);
 		}
 	}
+#endif
 	return banks;
 }
 
@@ -2075,12 +2077,12 @@ static int read_tpm_banks(int num_banks, struct tpm_bank_info *bank)
 	if (read_sysfs_pcrs(num_banks, bank) == 0)
 		return 0;
 
+#ifdef TPM2_HAS_BEEN_DISABLED
 	/* Any userspace applications available for reading TPM 2.0 PCRs? */
 	if (!tpm2_pcr_supported()) {
 		log_debug("Failed to read TPM 2.0 PCRs\n");
 		return 1;
 	}
-
 	/* Read PCRs from multiple TPM 2.0 banks */
 	for (i = 0; i < num_banks; i++) {
 		err = 0;
@@ -2098,6 +2100,7 @@ static int read_tpm_banks(int num_banks, struct tpm_bank_info *bank)
 		if (bank[i].supported)
 			tpm_enabled = 1;
 	}
+#endif
 	return tpm_enabled ? 0 : 1;
 }
 
