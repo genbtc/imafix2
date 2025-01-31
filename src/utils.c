@@ -77,8 +77,7 @@ int get_cmd_path(const char *prog_name, char *buf, size_t buf_len)
 		if (buf_len - size > ret && file_exist(buf))
 			return 0;
 
-		if (end != NULL)
-			start = end + 1;
+		start = end + 1;
 
 	} while (end != NULL);
 
@@ -112,4 +111,14 @@ int hex2bin(void *dst, const char *src, size_t count)
 		*(uint8_t *)dst++ = (hi << 4) | lo;
 	}
 	return 0;
+}
+
+void printCharInHexadecimal(const char* str, int len) {
+  for (int i = 0; i < len; ++ i) {
+    uint8_t val = str[i];
+    char tbl[] = "0123456789abcdef";
+    printf("%c", tbl[val / 16]);
+    printf("%c", tbl[val % 16]);
+  }
+  printf("\n");
 }

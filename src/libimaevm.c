@@ -45,7 +45,6 @@
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <asm/byteorder.h>
-#include <arpa/inet.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <string.h>
@@ -53,14 +52,11 @@
 #include <assert.h>
 #include <ctype.h>
 
-#include <openssl/asn1.h>
 #include <openssl/crypto.h>
 #include <openssl/pem.h>
 #include <openssl/evp.h>
 #include <openssl/x509.h>
-#include <openssl/x509v3.h>
 #include <openssl/err.h>
-#include <openssl/engine.h>
 
 #include "imaevm.h"
 #include "hash_info.h"
@@ -89,19 +85,19 @@ static const char *const pkey_hash_algo_kern[PKEY_HASH__LAST] = {
 struct libimaevm_params imaevm_params = {
 	.verbose = LOG_INFO,
 	.x509 = 1,
-	.hash_algo = DEFAULT_HASH_ALGO,
+	.hash_algo = "sha512",
 };
 
 static void __attribute__ ((constructor)) libinit(void);
 
-void imaevm_do_hexdump(FILE *fp, const void *ptr, int len, bool newline)
+void imaevm_do_hexdump(FILE *fp, const void *ptr, int len, bool cr)
 {
 	int i;
 	uint8_t *data = (uint8_t *) ptr;
 
 	for (i = 0; i < len; i++)
 		fprintf(fp, "%02x", data[i]);
-	if (newline)
+	if (cr)
 		fprintf(fp, "\n");
 }
 
@@ -160,7 +156,7 @@ static int add_file_hash(const char *file, EVP_MD_CTX *ctx)
 
 	for (size = stats.st_size; size; size -= len) {
 		len = MIN(size, bs);
-		if (fread(data, len, 1, fp) != 1) {
+		if (!fread(data, len, 1, fp)) {
 			if (ferror(fp)) {
 				log_err("fread() failed\n\n");
 				goto out;
@@ -179,6 +175,67 @@ out:
 	free(data);
 
 	return err;
+}
+
+static int add_dir_hash(const char *file, EVP_MD_CTX *ctx)
+{
+	int err;
+	struct dirent *de;
+	DIR *dir;
+	unsigned long long ino, off;
+	unsigned int type;
+	int result = 0;
+
+	dir = opendir(file);
+	if (!dir) {
+		log_err("Failed to open: %s\n", file);
+		return -1;
+	}
+
+	while ((de = readdir(dir))) {
+		ino = de->d_ino;
+		off = de->d_off;
+		type = de->d_type;
+		log_debug("entry: %s, ino: %llu, type: %u, off: %llu, reclen: %hu\n",
+			  de->d_name, ino, type, off, de->d_reclen);
+		err = EVP_DigestUpdate(ctx, de->d_name, strlen(de->d_name));
+		/*err |= EVP_DigestUpdate(ctx, &off, sizeof(off));*/
+		err |= EVP_DigestUpdate(ctx, &ino, sizeof(ino));
+		err |= EVP_DigestUpdate(ctx, &type, sizeof(type));
+		if (!err) {
+			log_err("EVP_DigestUpdate() failed\n");
+			output_openssl_errors();
+			result = 1;
+			break;
+		}
+	}
+
+	closedir(dir);
+
+	return result;
+}
+
+static int add_link_hash(const char *path, EVP_MD_CTX *ctx)
+{
+	int err;
+	char buf[1024];
+
+	err = readlink(path, buf, sizeof(buf));
+	if (err <= 0)
+		return -1;
+
+	log_info("link: %s -> %.*s\n", path, err, buf);
+	return !EVP_DigestUpdate(ctx, buf, err);
+}
+
+static int add_dev_hash(struct stat *st, EVP_MD_CTX *ctx)
+{
+	uint32_t dev = st->st_rdev;
+	unsigned major = (dev & 0xfff00) >> 8;
+	unsigned minor = (dev & 0xff) | ((dev >> 12) & 0xfff00);
+
+	log_info("device: %u:%u\n", major, minor);
+	return !EVP_DigestUpdate(ctx, &dev, sizeof(dev));
 }
 
 int ima_calc_hash(const char *file, uint8_t *hash)
@@ -221,8 +278,18 @@ int ima_calc_hash(const char *file, uint8_t *hash)
 	case S_IFREG:
 		err = add_file_hash(file, pctx);
 		break;
+	case S_IFDIR:
+		err = add_dir_hash(file, pctx);
+		break;
+	case S_IFLNK:
+		err = add_link_hash(file, pctx);
+		break;
+	case S_IFIFO: case S_IFSOCK:
+	case S_IFCHR: case S_IFBLK:
+		err = add_dev_hash(&st, pctx);
+		break;
 	default:
-		log_err("Unsupported file type (0x%x)", st.st_mode & S_IFMT);
+		log_errno("Unsupported file type");
 		err = -1;
 		goto err;
 	}
@@ -250,7 +317,6 @@ EVP_PKEY *read_pub_pkey(const char *keyfile, int x509)
 {
 	FILE *fp;
 	EVP_PKEY *pkey = NULL;
-	struct stat st;
 
 	if (!keyfile)
 		return NULL;
@@ -260,17 +326,6 @@ EVP_PKEY *read_pub_pkey(const char *keyfile, int x509)
 		if (imaevm_params.verbose > LOG_INFO)
 			log_info("Failed to open keyfile: %s\n", keyfile);
 		return NULL;
-	}
-
-	if (fstat(fileno(fp), &st) == -1) {
-		log_err("Failed to fstat key file: %s\n", keyfile);
-		goto out;
-	}
-
-	if ((st.st_mode & S_IFMT) != S_IFREG) {
-		if (imaevm_params.verbose > LOG_INFO)
-			log_err("Key file is not regular file: %s\n", keyfile);
-		goto out;
 	}
 
 	if (x509) {
@@ -302,7 +357,6 @@ out:
 	return pkey;
 }
 
-#if CONFIG_SIGV1
 RSA *read_pub_key(const char *keyfile, int x509)
 {
 	EVP_PKEY *pkey;
@@ -362,7 +416,6 @@ static int verify_hash_v1(const char *file, const unsigned char *hash, int size,
 
 	return 0;
 }
-#endif  /* CONFIG_SIGV1 */
 
 struct public_key_entry {
 	struct public_key_entry *next;
@@ -410,6 +463,8 @@ void init_public_keys(const char *keyfiles)
 	keyfiles_free = tmp_keyfiles;
 
 	while ((keyfile = strsep(&tmp_keyfiles, ", \t")) != NULL) {
+		if (!keyfile)
+			break;
 		if ((*keyfile == '\0') || (*keyfile == ' ') ||
 		    (*keyfile == '\t'))
 			continue;
@@ -428,7 +483,7 @@ void init_public_keys(const char *keyfiles)
 
 		calc_keyid_v2(&entry->keyid, entry->name, entry->key);
 		sprintf(entry->name, "%x", __be32_to_cpup(&entry->keyid));
-		log_info("key %d: %s %s\n", i++, entry->name, keyfile);
+		log_debug("key %d: %s %s\n", i++, entry->name, keyfile);
 		entry->next = public_keys;
 		public_keys = entry;
 	}
@@ -436,21 +491,10 @@ void init_public_keys(const char *keyfiles)
 }
 
 /*
- * Verify a signature, prefixed with the signature_v2_hdr, either based
- * directly or indirectly on the file data hash.
- *
- * version 2: directly based on the file data hash (e.g. sha*sum)
- * version 3: indirectly based on the hash of the struct ima_file_id, which
- *	      contains the xattr type (enum evm_ima_xattr_type), the hash
- *	      algorithm (enum hash_algo), and the file data hash
- *	      (e.g. fsverity digest).
- *
  * Return: 0 verification good, 1 verification bad, -1 error.
- *
- * (Note: signature_v2_hdr struct does not contain the 'type'.)
  */
-static int verify_hash_common(const char *file, const unsigned char *hash,
-			      int size, unsigned char *sig, int siglen)
+static int verify_hash_v2(const char *file, const unsigned char *hash, int size,
+			  unsigned char *sig, int siglen)
 {
 	int ret = -1;
 	EVP_PKEY *pkey, *pkey_free = NULL;
@@ -473,16 +517,6 @@ static int verify_hash_common(const char *file, const unsigned char *hash,
 				 file, __be32_to_cpup(&keyid));
 		return -1;
 	}
-
-#if defined(EVP_PKEY_SM2) && OPENSSL_VERSION_NUMBER < 0x30000000
-	/* If EC key are used, check whether it is SM2 key */
-	if (EVP_PKEY_id(pkey) == EVP_PKEY_EC) {
-		EC_KEY *ec = EVP_PKEY_get0_EC_KEY(pkey);
-		int curve = EC_GROUP_get_curve_name(EC_KEY_get0_group(ec));
-		if (curve == NID_sm2)
-			EVP_PKEY_set_alias_type(pkey, EVP_PKEY_SM2);
-	}
-#endif
 
 	st = "EVP_PKEY_CTX_new";
 	if (!(ctx = EVP_PKEY_CTX_new(pkey, NULL)))
@@ -518,128 +552,6 @@ err:
 	EVP_PKEY_CTX_free(ctx);
 	EVP_PKEY_free(pkey_free);
 	return ret;
-}
-
-/*
- * Verify a signature, prefixed with the signature_v2_hdr, directly based
- * on the file data hash.
- *
- * Return: 0 verification good, 1 verification bad, -1 error.
- */
-static int verify_hash_v2(const char *file, const unsigned char *hash,
-			  int size, unsigned char *sig, int siglen)
-{
-	/* note: signature_v2_hdr does not contain 'type', use sig + 1 */
-	return verify_hash_common(file, hash, size, sig + 1, siglen - 1);
-}
-
-/*
- * Verify a signature, prefixed with the signature_v2_hdr, indirectly based
- * on the file data hash.
- *
- * Return: 0 verification good, 1 verification bad, -1 error.
- */
-static int verify_hash_v3(const char *file, const unsigned char *hash,
-			  int size, unsigned char *sig, int siglen)
-{
-	unsigned char sigv3_hash[MAX_DIGEST_SIZE];
-	int ret;
-
-	ret = calc_hash_sigv3(sig[0], NULL, hash, sigv3_hash);
-	if (ret < 0)
-		return ret;
-
-	/* note: signature_v2_hdr does not contain 'type', use sig + 1 */
-	return verify_hash_common(file, sigv3_hash, size, sig + 1, siglen - 1);
-}
-
-#define HASH_MAX_DIGESTSIZE 64	/* kernel HASH_MAX_DIGESTSIZE is 64 bytes */
-
-struct ima_file_id {
-	__u8 hash_type;		/* xattr type [enum evm_ima_xattr_type] */
-	__u8 hash_algorithm;	/* Digest algorithm [enum hash_algo] */
-	__u8 hash[HASH_MAX_DIGESTSIZE];
-} __packed;
-
-/*
- * Calculate the signature format version 3 hash based on the portion
- * of the ima_file_id structure used, not the entire structure.
- *
- * On success, return the hash length, otherwise for openssl errors
- * return 1, other errors return -EINVAL.
- */
-int calc_hash_sigv3(enum evm_ima_xattr_type type, const char *algo,
-		    const unsigned char *in_hash, unsigned char *out_hash)
-{
-	struct ima_file_id file_id = { .hash_type = IMA_VERITY_DIGSIG };
-	uint8_t *data = (uint8_t *) &file_id;
-
-	const EVP_MD *md;
-	EVP_MD_CTX *pctx;
-	unsigned int mdlen;
-	int err;
-#if OPENSSL_VERSION_NUMBER < 0x10100000
-	EVP_MD_CTX ctx;
-	pctx = &ctx;
-#else
-	pctx = EVP_MD_CTX_new();
-#endif
-	int hash_algo;
-	int hash_size;
-	unsigned int unused;
-
-	if (type != IMA_VERITY_DIGSIG) {
-		log_err("Only fsverity supports signature format v3 (sigv3)\n");
-		return -EINVAL;
-	}
-
-	if (!algo)
-		algo = imaevm_params.hash_algo;
-
-	if ((hash_algo = imaevm_get_hash_algo(algo)) < 0) {
-		log_err("Hash algorithm %s not supported\n", algo);
-		return -EINVAL;
-	}
-	file_id.hash_algorithm = hash_algo;
-
-	md = EVP_get_digestbyname(algo);
-	if (!md) {
-		log_err("EVP_get_digestbyname(%s) failed\n", algo);
-		err = 1;
-		goto err;
-	}
-
-	hash_size = EVP_MD_size(md);
-	memcpy(file_id.hash, in_hash, hash_size);
-
-	err = EVP_DigestInit(pctx, md);
-	if (!err) {
-		log_err("EVP_DigestInit() failed\n");
-		err = 1;
-		goto err;
-	}
-
-	unused = HASH_MAX_DIGESTSIZE - hash_size;
-	if (!EVP_DigestUpdate(pctx, data, sizeof(file_id) - unused)) {
-		log_err("EVP_DigestUpdate() failed\n");
-		err = 1;
-		goto err;
-	}
-
-	err = EVP_DigestFinal(pctx, out_hash, &mdlen);
-	if (!err) {
-		log_err("EVP_DigestFinal() failed\n");
-		err = 1;
-		goto err;
-	}
-	err = mdlen;
-err:
-	if (err == 1)
-		output_openssl_errors();
-#if OPENSSL_VERSION_NUMBER >= 0x10100000
-	EVP_MD_CTX_free(pctx);
-#endif
-	return err;
 }
 
 int imaevm_get_hash_algo(const char *algo)
@@ -684,7 +596,7 @@ int imaevm_hash_algo_from_sig(unsigned char *sig)
 		default:
 			return -1;
 		}
-	} else if (sig[0] == DIGSIG_VERSION_2 || sig[0] == DIGSIG_VERSION_3) {
+	} else if (sig[0] == DIGSIG_VERSION_2) {
 		hashalgo = ((struct signature_v2_hdr *)sig)->hash_algo;
 		if (hashalgo >= PKEY_HASH__LAST)
 			return -1;
@@ -693,29 +605,19 @@ int imaevm_hash_algo_from_sig(unsigned char *sig)
 		return -1;
 }
 
-int verify_hash(const char *file, const unsigned char *hash, int size,
-		unsigned char *sig, int siglen)
+int verify_hash(const char *file, const unsigned char *hash, int size, unsigned char *sig,
+		int siglen)
 {
 	/* Get signature type from sig header */
-	if (sig[1] == DIGSIG_VERSION_1) {
-#if CONFIG_SIGV1
+	if (sig[0] == DIGSIG_VERSION_1) {
 		const char *key = NULL;
 
 		/* Read pubkey from RSA key */
-		if (!imaevm_params.keyfile)
-			key = "/etc/keys/pubkey_evm.pem";
-		else
-			key = imaevm_params.keyfile;
-		return verify_hash_v1(file, hash, size, sig + 1, siglen - 1,
-					 key);
-#else
-		log_info("Signature version 1 deprecated.");
-		return -1;
-#endif
-	} else if (sig[1] == DIGSIG_VERSION_2) {
+		key = imaevm_params.keyfile ? : PRIVKEY_EVM_PEM;
+
+		return verify_hash_v1(file, hash, size, sig, siglen, key);
+	} else if (sig[0] == DIGSIG_VERSION_2) {
 		return verify_hash_v2(file, hash, size, sig, siglen);
-	} else if (sig[1] == DIGSIG_VERSION_3) {
-		return verify_hash_v3(file, hash, size, sig, siglen);
 	} else
 		return -1;
 }
@@ -726,19 +628,16 @@ int ima_verify_signature(const char *file, unsigned char *sig, int siglen,
 	unsigned char hash[MAX_DIGEST_SIZE];
 	int hashlen, sig_hash_algo;
 
-	if (sig[0] != EVM_IMA_XATTR_DIGSIG && sig[0] != IMA_VERITY_DIGSIG) {
-		log_err("%s: xattr ima has no signature\n", file);
-		return -1;
-	}
-
-	if (!digest && sig[0] == IMA_VERITY_DIGSIG) {
-		log_err("%s: calculating the fs-verity digest is not supported\n", file);
+	if (sig[0] != EVM_IMA_XATTR_DIGSIG) {
+		log_err("%s: xattr security.ima has no signature\n", file);
 		return -1;
 	}
 
 	sig_hash_algo = imaevm_hash_algo_from_sig(sig + 1);
+	if (imaevm_params.verbose > LOG_INFO)
+        log_info("SigHashAlgo: %d \n",sig_hash_algo);
 	if (sig_hash_algo < 0) {
-		log_err("%s: Invalid signature\n", file);
+		log_err("%s: unknown hash algo/Invalid signature\n", file);
 		return -1;
 	}
 	/* Use hash algorithm as retrieved from signature */
@@ -748,18 +647,23 @@ int ima_verify_signature(const char *file, unsigned char *sig, int siglen,
 	 * Validate the signature based on the digest included in the
 	 * measurement list, not by calculating the local file digest.
 	 */
-	if (digest && digestlen > 0)
-		return verify_hash(file, digest, digestlen, sig, siglen);
-
+	if (digestlen > 0) {
+		if (imaevm_params.verbose > LOG_INFO)
+			log_info("Verify the signature based on the digest included, digestlen = %d\n", digestlen);
+	    return verify_hash(file, digest, digestlen, sig + 1, siglen - 1);
+	}
+	else {
+		if (imaevm_params.verbose > LOG_INFO)
+			log_info("Digest doesnt exist, Verify requires recalculating hash from file...\n");
+	}
 	hashlen = ima_calc_hash(file, hash);
 	if (hashlen <= 1)
 		return hashlen;
 	assert(hashlen <= sizeof(hash));
 
-	return verify_hash(file, hash, hashlen, sig, siglen);
+	return verify_hash(file, hash, hashlen, sig + 1, siglen - 1);
 }
 
-#if CONFIG_SIGV1
 /*
  * Create binary key representation suitable for kernel
  */
@@ -818,7 +722,6 @@ void calc_keyid_v1(uint8_t *keyid, char *str, const unsigned char *pkey, int len
 	if (imaevm_params.verbose > LOG_INFO)
 		log_info("keyid-v1: %s\n", str);
 }
-#endif /* CONFIG_SIGV1 */
 
 /*
  * Calculate keyid of the public_key part of EVP_PKEY
@@ -850,170 +753,27 @@ void calc_keyid_v2(uint32_t *keyid, char *str, EVP_PKEY *pkey)
 	X509_PUBKEY_free(pk);
 }
 
-/*
- * Extract SKID from x509 in openssl portable way.
- */
-static const unsigned char *x509_get_skid(X509 *x, int *len)
-{
-#if OPENSSL_VERSION_NUMBER < 0x10100000
-	ASN1_STRING *skid;
-
-	/*
-	 * This will cache extensions.
-	 * OpenSSL uses this method itself.
-	 */
-	if (X509_check_purpose(x, -1, -1) != 1)
-		return NULL;
-	skid = x->skid;
-#else
-	const ASN1_OCTET_STRING *skid = X509_get0_subject_key_id(x);
-#endif
-	if (len)
-		*len = ASN1_STRING_length(skid);
-#if OPENSSL_VERSION_NUMBER < 0x10100000
-	return ASN1_STRING_data(x->skid);
-#else
-	return ASN1_STRING_get0_data(skid);
-#endif
-}
-
-/*
- * read_keyid_from_cert() - Read keyid from SKID from x509 certificate file
- * @keyid_be:	Output 32-bit keyid in network order (BE);
- * @certfile:	Input filename.
- * @try_der:	true:  try to read in DER from if there is no PEM,
- *		       cert is considered mandatory and error will be issued
- *		       if there is no cert;
- *		false: only try to read in PEM form, cert is considered
- *		       optional.
- * Return:	0 on success, -1 on error.
- */
-static int read_keyid_from_cert(uint32_t *keyid_be, const char *certfile, int try_der)
-{
-	X509 *x = NULL;
-	FILE *fp;
-	const unsigned char *skid;
-	int skid_len;
-
-	if (!(fp = fopen(certfile, "r"))) {
-		log_err("Cannot open %s: %s\n", certfile, strerror(errno));
-		return -1;
-	}
-	if (!PEM_read_X509(fp, &x, NULL, NULL)) {
-		if (ERR_GET_REASON(ERR_peek_last_error()) == PEM_R_NO_START_LINE) {
-			ERR_clear_error();
-			if (try_der) {
-				rewind(fp);
-				d2i_X509_fp(fp, &x);
-			} else {
-				/*
-				 * Cert is optional and there is just no PEM
-				 * header, then issue debug message and stop
-				 * trying.
-				 */
-				log_debug("%s: x509 certificate not found\n",
-					  certfile);
-				fclose(fp);
-				return -1;
-			}
-		}
-	}
-	fclose(fp);
-	if (!x) {
-		ERR_print_errors_fp(stderr);
-		log_err("read keyid: %s: Error reading x509 certificate\n",
-			certfile);
-		return -1;
-	}
-
-	if (!(skid = x509_get_skid(x, &skid_len))) {
-		log_err("read keyid: %s: SKID not found\n", certfile);
-		goto err_free;
-	}
-	if (skid_len < sizeof(*keyid_be)) {
-		log_err("read keyid: %s: SKID too short (len %d)\n", certfile,
-			skid_len);
-		goto err_free;
-	}
-	memcpy(keyid_be, skid + skid_len - sizeof(*keyid_be), sizeof(*keyid_be));
-	log_info("keyid %04x (from %s)\n", ntohl(*keyid_be), certfile);
-	X509_free(x);
-	return 0;
-
-err_free:
-	X509_free(x);
-	return -1;
-}
-
-/*
- * imaevm_read_keyid() - Read 32-bit keyid from the cert file
- * @certfile:	File with certificate in PEM or DER form.
- *
- * Try to read keyid from Subject Key Identifier (SKID) of x509 certificate.
- * Autodetect if cert is in PEM (tried first) or DER encoding.
- *
- * Return: 0 on error or 32-bit keyid in host order otherwise.
- */
-uint32_t imaevm_read_keyid(const char *certfile)
-{
-	uint32_t keyid_be = 0;
-
-	read_keyid_from_cert(&keyid_be, certfile, true);
-	/* On error keyid_be will not be set, returning 0. */
-	return ntohl(keyid_be);
-}
-
 static EVP_PKEY *read_priv_pkey(const char *keyfile, const char *keypass)
 {
 	FILE *fp;
-	EVP_PKEY *pkey = NULL;
+	EVP_PKEY *pkey;
 
-	if (!strncmp(keyfile, "pkcs11:", 7)) {
-#ifdef CONFIG_IMA_EVM_ENGINE
-		if (!imaevm_params.keyid) {
-			log_err("When using a pkcs11 URI you must provide the keyid with an option\n");
-			return NULL;
-		}
-
-		if (keypass) {
-			if (!ENGINE_ctrl_cmd_string(imaevm_params.eng, "PIN", keypass, 0)) {
-				log_err("Failed to set the PIN for the private key\n");
-				goto err_engine;
-			}
-		}
-		pkey = ENGINE_load_private_key(imaevm_params.eng, keyfile, NULL, NULL);
-		if (!pkey) {
-			log_err("Failed to load private key %s\n", keyfile);
-			goto err_engine;
-		}
-#else
-		log_err("OpenSSL \"engine\" support is disabled\n");
-		goto err_engine;
-#endif
-	} else {
-		fp = fopen(keyfile, "r");
-		if (!fp) {
-			log_err("Failed to open keyfile: %s\n", keyfile);
-			return NULL;
-		}
-		pkey = PEM_read_PrivateKey(fp, NULL, NULL, (void *)keypass);
-		if (!pkey) {
-			log_err("Failed to PEM_read_PrivateKey key file: %s\n",
-				keyfile);
-			output_openssl_errors();
-		}
-
-		fclose(fp);
+	fp = fopen(keyfile, "r");
+	if (!fp) {
+		log_err("Failed to open keyfile: %s\n", keyfile);
+		return NULL;
+	}
+	pkey = PEM_read_PrivateKey(fp, NULL, NULL, (void *)keypass);
+	if (!pkey) {
+		log_err("Failed to PEM_read_PrivateKey key file: %s\n",
+			keyfile);
+		output_openssl_errors();
 	}
 
+	fclose(fp);
 	return pkey;
-
-err_engine:
-	output_openssl_errors();
-	return NULL;
 }
 
-#if CONFIG_SIGV1
 static RSA *read_priv_key(const char *keyfile, const char *keypass)
 {
 	EVP_PKEY *pkey;
@@ -1119,12 +879,11 @@ static int sign_hash_v1(const char *hashalgo, const unsigned char *hash,
 	blen = (uint16_t *) (sig + sizeof(*hdr));
 	*blen = __cpu_to_be16(len << 3);
 	len += sizeof(*hdr) + 2;
-	log_info("evm/ima signature-v1: %d bytes\n", len);
+	log_debug("evm/ima signature-v1: %d bytes\n", len);
 out:
 	RSA_free(key);
 	return len;
 }
-#endif /* CONFIG_SIGV1 */
 
 /*
  * @sig is assumed to be of (MAX_SIGNATURE_SIZE - 1) size
@@ -1135,13 +894,13 @@ static int sign_hash_v2(const char *algo, const unsigned char *hash,
 {
 	struct signature_v2_hdr *hdr;
 	int len = -1;
-	EVP_PKEY *pkey;
+	EVP_PKEY *pkey = NULL;
 	char name[20];
 	EVP_PKEY_CTX *ctx = NULL;
 	const EVP_MD *md;
-	size_t sigsize;
+	size_t sigsize = MAX_SIGNATURE_SIZE - sizeof(struct signature_v2_hdr) - 1;
 	const char *st;
-	uint32_t keyid;
+	uint32_t keyid = 0;
 
 	if (!hash) {
 		log_err("sign_hash_v2: hash is null\n");
@@ -1163,7 +922,7 @@ static int sign_hash_v2(const char *algo, const unsigned char *hash,
 		return -1;
 	}
 
-	log_info("hash(%s): ", algo);
+	log_info("hash(%s): ", imaevm_params.hash_algo);
 	log_dump(hash, size);
 
 	pkey = read_priv_pkey(keyfile, imaevm_params.keypass);
@@ -1179,24 +938,7 @@ static int sign_hash_v2(const char *algo, const unsigned char *hash,
 		return -1;
 	}
 
-#if defined(EVP_PKEY_SM2) && OPENSSL_VERSION_NUMBER < 0x30000000
-	/* If EC key are used, check whether it is SM2 key */
-	if (EVP_PKEY_id(pkey) == EVP_PKEY_EC) {
-		EC_KEY *ec = EVP_PKEY_get0_EC_KEY(pkey);
-		int curve = EC_GROUP_get_curve_name(EC_KEY_get0_group(ec));
-		if (curve == NID_sm2)
-			EVP_PKEY_set_alias_type(pkey, EVP_PKEY_SM2);
-	}
-#endif
-
-	if (imaevm_params.keyid)
-		keyid = htonl(imaevm_params.keyid);
-	else {
-		int keyid_read_failed = read_keyid_from_cert(&keyid, keyfile, false);
-
-		if (keyid_read_failed)
-			calc_keyid_v2(&keyid, name, pkey);
-	}
+	calc_keyid_v2(&keyid, name, pkey);
 	hdr->keyid = keyid;
 
 	st = "EVP_PKEY_CTX_new";
@@ -1206,21 +948,38 @@ static int sign_hash_v2(const char *algo, const unsigned char *hash,
 	if (!EVP_PKEY_sign_init(ctx))
 		goto err;
 	st = "EVP_get_digestbyname";
-	if (!(md = EVP_get_digestbyname(algo)))
+	if (!(md = EVP_get_digestbyname(imaevm_params.hash_algo)))
 		goto err;
+	st = "EVP_PKEY_CTX_set_rsa_padding";
+	if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_PADDING) <= 0)
 	st = "EVP_PKEY_CTX_set_signature_md";
 	if (!EVP_PKEY_CTX_set_signature_md(ctx, md))
 		goto err;
+
+	if (imaevm_params.verbose > LOG_INFO) {
+		log_info("hash size: (%d)\n", size);
+		log_info("sig max size: (%lu) \nsignature: ", sigsize); //1024-8-1=1015
+	}
+
+	// Assuming hdr->sig is a pointer to a 1024-byte buffer
+	memset(hdr->sig, 0, 1024);  // Zero out the buffer of size 1024 bytes
+
 	st = "EVP_PKEY_sign";
-	sigsize = MAX_SIGNATURE_SIZE - sizeof(struct signature_v2_hdr) - 1;
 	if (!EVP_PKEY_sign(ctx, hdr->sig, &sigsize, hash, size))
 		goto err;
 	len = (int)sigsize;
 
+    log_dump(&hdr->sig, sigsize);
+
 	/* we add bit length of the signature to make it gnupg compatible */
 	hdr->sig_size = __cpu_to_be16(len);
 	len += sizeof(*hdr);
-	log_info("evm/ima signature: %d bytes\n", len);
+	log_debug("evm/ima signature: %d bytes to be written\n", len);
+
+    if (imaevm_params.verbose > LOG_INFO) {
+        log_info("header: ");
+        log_dump(hdr, sizeof(struct signature_v2_hdr));
+    }
 
 err:
 	if (len == -1) {
@@ -1239,14 +998,9 @@ int sign_hash(const char *hashalgo, const unsigned char *hash, int size, const c
 	if (keypass)
 		imaevm_params.keypass = keypass;
 
-	if (imaevm_params.x509)
-		return sign_hash_v2(hashalgo, hash, size, keyfile, sig);
-#if CONFIG_SIGV1
-	else
-		return sign_hash_v1(hashalgo, hash, size, keyfile, sig);
-#endif
-	log_info("Signature version 1 deprecated.");
-	return -1;
+	return imaevm_params.x509 ?
+		sign_hash_v2(hashalgo, hash, size, keyfile, sig) :
+		sign_hash_v1(hashalgo, hash, size, keyfile, sig);
 }
 
 static void libinit()
