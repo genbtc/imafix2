@@ -1,3 +1,6 @@
+#the binary itself
+src/imafix2
+
 # Prerequisites
 *.d
 
