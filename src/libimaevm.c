@@ -656,6 +656,7 @@ int ima_verify_signature(const char *file, unsigned char *sig, int siglen,
 		if (imaevm_params.verbose > LOG_INFO)
 			log_info("Digest doesnt exist, Verify requires recalculating hash from file...\n");
 	}
+	//Or calculate the local file hash
 	hashlen = ima_calc_hash(file, hash);
 	if (hashlen <= 1)
 		return hashlen;
@@ -950,8 +951,6 @@ static int sign_hash_v2(const char *algo, const unsigned char *hash,
 	st = "EVP_get_digestbyname";
 	if (!(md = EVP_get_digestbyname(imaevm_params.hash_algo)))
 		goto err;
-	st = "EVP_PKEY_CTX_set_rsa_padding";
-	if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_PADDING) <= 0)
 	st = "EVP_PKEY_CTX_set_signature_md";
 	if (!EVP_PKEY_CTX_set_signature_md(ctx, md))
 		goto err;
@@ -960,9 +959,6 @@ static int sign_hash_v2(const char *algo, const unsigned char *hash,
 		log_info("hash size: (%d)\n", size);
 		log_info("sig max size: (%lu) \nsignature: ", sigsize); //1024-8-1=1015
 	}
-
-	// Assuming hdr->sig is a pointer to a 1024-byte buffer
-	memset(hdr->sig, 0, 1024);  // Zero out the buffer of size 1024 bytes
 
 	st = "EVP_PKEY_sign";
 	if (!EVP_PKEY_sign(ctx, hdr->sig, &sigsize, hash, size))

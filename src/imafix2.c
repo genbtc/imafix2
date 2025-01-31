@@ -336,16 +336,6 @@ static int imafix2(const char *path)
 		}
 		else
 			log_err("BUG: imafix2() - Something Else Bad Happened, wrong Hash Algo, or Data is unreadable. ABORT!\n");
-		//return 0;.
-		//TODO FIX THIS:
-//>------------->
-		//HASHFAIL: (null)//usr/share/doc
-		//hash(sha512): /usr/src: verification failed: 0 (bad signature)
-//<-------------<
-		//hashfail comes from above. verification failfed comes from deep in libima
-		//we do actually fix the file Commit-New-Hash so running it again produces other output:
-		//HASHFAIL: (null)//usr/share/doc
-		//hash(sha512): ^D|gentoo / #
 	}
 	else {
 		log_info("IMA(fixhash): %s\n", path);
