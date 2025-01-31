@@ -1,0 +1,93 @@
+#!/bin/sh
+#
+# Generate hash_info.h from kernel headers
+#
+# Copyright (C) 2018 <vt@altlinux.org>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+KERNEL_HEADERS=$1
+HASH_INFO_H=uapi/linux/hash_info.h
+HASH_INFO=$KERNEL_HEADERS/include/$HASH_INFO_H
+
+TMPHASHINFO="./tmp_hash_info.h"
+gen_hashinfo() {
+cat << __EOF__ >$TMPHASHINFO
+/* SPDX-License-Identifier: GPL-2.0+ WITH Linux-syscall-note */
+/*
+ * Hash Info: Hash algorithms information
+ *
+ * Copyright (c) 2013 Dmitry Kasatkin <d.kasatkin@samsung.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ */
+
+enum hash_algo {
+	HASH_ALGO_MD4,
+	HASH_ALGO_MD5,
+	HASH_ALGO_SHA1,
+	HASH_ALGO_RIPE_MD_160,
+	HASH_ALGO_SHA256,
+	HASH_ALGO_SHA384,
+	HASH_ALGO_SHA512,
+	HASH_ALGO_SHA224,
+	HASH_ALGO_RIPE_MD_128,
+	HASH_ALGO_RIPE_MD_256,
+	HASH_ALGO_RIPE_MD_320,
+	HASH_ALGO_WP_256,
+	HASH_ALGO_WP_384,
+	HASH_ALGO_WP_512,
+	HASH_ALGO_TGR_128,
+	HASH_ALGO_TGR_160,
+	HASH_ALGO_TGR_192,
+	HASH_ALGO_SM3_256,
+	HASH_ALGO__LAST
+};
+__EOF__
+}
+
+# Allow to specify kernel-headers past include/
+if [ ! -e $HASH_INFO ]; then
+  HASH_INFO2=$KERNEL_HEADERS/$HASH_INFO_H
+  if [ -e $HASH_INFO2 ]; then
+    HASH_INFO=$HASH_INFO2
+  else
+    gen_hashinfo
+    HASH_INFO="$TMPHASHINFO"
+  fi
+fi
+
+if [ ! -e $HASH_INFO ]; then
+  echo "/* $HASH_INFO is not found */"
+  HASH_INFO=/dev/null
+else
+  echo "/* $HASH_INFO is found */"
+fi
+
+echo "enum hash_algo {"
+grep HASH_ALGO_.*, $HASH_INFO
+printf "\tHASH_ALGO__LAST\n"
+echo "};"
+
+echo "const char *const hash_algo_name[HASH_ALGO__LAST] = {"
+sed -n 's/HASH_ALGO_\(.*\),/\1 \L\1\E/p' $HASH_INFO | \
+  while read a b; do
+    # Normalize text hash name: sm3 algorithm name is different from
+    # the macro definition, which is also the only special case of an
+    # underscore between digits. Remove all other underscores.
+    b=$(echo "$b" | sed "s/sm3_256/sm3/g;s/_//g")
+    printf '\t%-26s = "%s",\n' "[HASH_ALGO_$a]" "$b"
+  done
+echo "};"
