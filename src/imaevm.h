@@ -48,12 +48,16 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <openssl/rsa.h>
+//include hash_info from system instead - genr8
+#include <linux/hash_info.h>
 
+#ifdef CONFIG_IMA_EVM_ENGINE
+#include <openssl/engine.h>
+#endif
 
-#define PRIVKEY_EVM_PEM "/etc/keys/privkey_evm.pem"
-#define PUBKEY_EVM_PEM "/etc/keys/pubkey_evm.pem"
-#define PUBKEY_EVM_X509 "/etc/keys/x509_evm.der"
-
+#if defined(OPENSSL_NO_ENGINE) || defined(OPENSSL_NO_DYNAMIC_ENGINE)
+#undef CONFIG_IMA_EVM_ENGINE
+#endif
 
 #ifdef USE_FPRINTF
 #define do_log(level, fmt, args...)	\
@@ -80,6 +84,11 @@
 #define log_err(fmt, args...)		do_log(LOG_ERR, fmt, ##args)
 #define log_errno(fmt, args...)		do_log(LOG_ERR, fmt ": errno: %s (%d)\n", ##args, strerror(errno), errno)
 
+
+#define PRIVKEY_EVM_PEM "/etc/keys/privkey_evm.pem"
+#define PUBKEY_EVM_PEM "/etc/keys/pubkey_evm.pem"
+#define PUBKEY_EVM_X509 "/etc/keys/x509_evm.der"
+
 //modified from 4K Blocksize to 32K to increase performance (matches sha###sum command line programs)
 //#define	DATA_SIZE	4096
 #define	DATA_SIZE	32768
@@ -87,6 +96,16 @@
 
 #define MAX_DIGEST_SIZE		64
 #define MAX_SIGNATURE_SIZE	1024
+
+/*
+ * The maximum template data size is dependent on the template format. For
+ * example the 'ima-modsig' template includes two signatures - one for the
+ * entire file, the other without the appended signature - and other fields
+ * (e.g. file digest, file name, file digest without the appended signature).
+ *
+ * Other template formats are much smaller.
+ */
+#define MAX_TEMPLATE_SIZE	(MAX_SIGNATURE_SIZE * 4)
 
 #define __packed __attribute__((packed))
 
@@ -96,6 +115,7 @@ enum evm_ima_xattr_type {
 	EVM_IMA_XATTR_DIGSIG,
 	IMA_XATTR_DIGEST_NG,
 	EVM_XATTR_PORTABLE_DIGSIG,
+	IMA_VERITY_DIGSIG,
 };
 
 struct h_misc {
@@ -141,7 +161,8 @@ enum digest_algo {
 
 enum digsig_version {
 	DIGSIG_VERSION_1 = 1,
-	DIGSIG_VERSION_2
+	DIGSIG_VERSION_2,
+	DIGSIG_VERSION_3	/* hash of ima_file_id struct (portion used) */
 };
 
 struct pubkey_hdr {
@@ -204,6 +225,8 @@ struct libimaevm_params {
 	const char *hash_algo;
 	const char *keyfile;
 	const char *keypass;
+	uint32_t keyid;		/* keyid overriding value, unless 0. (Host order.) */
+	ENGINE *eng;
 };
 
 struct RSA_ASN1_template {
