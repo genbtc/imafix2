@@ -70,7 +70,7 @@
 #endif
 
 #ifdef DEBUG
-#define log_debug(fmt, args...)		do_log(LOG_DEBUG, "%s:%d " fmt, __func__ , __LINE__ , ##args)
+#define log_debug(fmt, args...)		do_log(LOG_DEBUG, "%s()#L%d " fmt, __func__ , __LINE__ , ##args)
 #define log_debug_dump(p, len)		do_log_dump(LOG_DEBUG, p, len, true)
 #define log_debug_dump_n(p, len)	do_log_dump(LOG_DEBUG, p, len, false)
 #else

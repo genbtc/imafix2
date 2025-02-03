@@ -144,7 +144,7 @@ static int hash_ima(const char *file)
 	len += offset;
 
 	if (imaevm_params.verbose >= LOG_INFO)
-		log_info("hash(%s): ", imaevm_params.hash_algo); //no \n
+		log_info("hash(%s): ", imaevm_params.hash_algo);
 
 	if (xattr) {
 		err = lsetxattr(file, xattr_ima, hash, len, 0);

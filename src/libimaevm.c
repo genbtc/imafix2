@@ -634,14 +634,13 @@ int ima_verify_signature(const char *file, unsigned char *sig, int siglen,
 	}
 
 	sig_hash_algo = imaevm_hash_algo_from_sig(sig + 1);
-	if (imaevm_params.verbose > LOG_INFO)
-        log_info("SigHashAlgo: %d \n",sig_hash_algo);
 	if (sig_hash_algo < 0) {
 		log_err("%s: unknown hash algo/Invalid signature\n", file);
 		return -1;
 	}
 	/* Use hash algorithm as retrieved from signature */
 	imaevm_params.hash_algo = imaevm_hash_algo_by_id(sig_hash_algo);
+	log_debug("SigHashAlgo: %s(%d) \n", imaevm_params.hash_algo, sig_hash_algo); // (number 6)
 
 	/*
 	 * Validate the signature based on the digest included in the
@@ -736,20 +735,27 @@ void calc_keyid_v2(uint32_t *keyid, char *str, EVP_PKEY *pkey)
 	/* This is more generic than i2d_PublicKey() */
 	if (X509_PUBKEY_set(&pk, pkey) &&
 	    X509_PUBKEY_get0_param(NULL, &public_key, &len, NULL, pk)) {
-		uint8_t sha1[SHA_DIGEST_LENGTH];
 
+		log_debug("dump public_key: ");
+		log_debug_dump(public_key, len);
+
+		uint8_t sha1[SHA_DIGEST_LENGTH];
 		SHA1(public_key, len, sha1);
-		/* sha1[12 - 19] is exactly keyid from gpg file */
+		/* sha1[16 - 19] is exactly keyid from gpg file */
 		memcpy(keyid, sha1 + 16, 4);
+
+		log_debug("SHA1 public_key: ");
+		log_debug_dump(sha1, SHA_DIGEST_LENGTH);
 	} else
 		*keyid = 0;
 
-	log_debug("keyid: ");
-	log_debug_dump(keyid, 4);
-	sprintf(str, "%x", __be32_to_cpup(keyid));
-
-	if (imaevm_params.verbose > LOG_INFO)
+	if (imaevm_params.verbose > LOG_INFO) {
+		sprintf(str, "%x", __be32_to_cpup(keyid));
 		log_info("keyid: %s\n", str);
+	} else {
+		log_debug("keyid: ");
+		log_debug_dump(keyid, 4);
+	}
 
 	X509_PUBKEY_free(pk);
 }
@@ -955,26 +961,20 @@ static int sign_hash_v2(const char *algo, const unsigned char *hash,
 	if (!EVP_PKEY_CTX_set_signature_md(ctx, md))
 		goto err;
 
-	// if (imaevm_params.verbose > LOG_INFO) {
-	// 	log_info("hash size: (%d)\n", size);
-	// 	log_info("sig max size: (%lu) \nsignature: ", sigsize); //1024-8-1=1015
-	// }
-
 	st = "EVP_PKEY_sign";
 	if (!EVP_PKEY_sign(ctx, hdr->sig, &sigsize, hash, size))
 		goto err;
 	len = (int)sigsize;
-
-    log_dump(&hdr->sig, sigsize);
-
-	/* we add bit length of the signature to make it gnupg compatible */
+	/* we add a "bit length" field to the signature (to make it gnupg compatible) */
 	hdr->sig_size = __cpu_to_be16(len);
 	len += sizeof(*hdr);
 	
-    if (imaevm_params.verbose > LOG_INFO) {
-        log_info("header: ");
-        log_dump(hdr, sizeof(struct signature_v2_hdr));
-    }
+    //if (imaevm_params.verbose > LOG_INFO) {
+        log_debug("header: ");
+        log_debug_dump(hdr, sizeof(struct signature_v2_hdr));
+		log_debug("signature: ");
+		log_debug_dump(&hdr->sig, sigsize);
+    //}
 	log_debug("evm/ima signature: %d bytes to be written\n", len);
 
 err:
