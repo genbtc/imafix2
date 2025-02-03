@@ -257,4 +257,10 @@ void init_public_keys(const char *keyfiles);
 int imaevm_hash_algo_from_sig(unsigned char *sig);
 const char *imaevm_hash_algo_by_id(int algo);
 
+//PCR.h
+/*
+int tpm2_pcr_supported(void);
+int tpm2_pcr_read(const char *algo_name, int idx, uint8_t *hwpcr,
+		 int len, char **errmsg);
+*/
 #endif

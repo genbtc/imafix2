@@ -1,0 +1,17 @@
+genr8eofl@genr8too ~/src/imafix2/src $ ./evmctl2.make 
+evmctl.c: In function 'cmd_sign_hash':
+evmctl.c:838:31: error: implicit declaration of function 'calc_hash_sigv3' [-Wimplicit-function-declaration]
+  838 |                         ret = calc_hash_sigv3(IMA_VERITY_DIGSIG, algo, hash,
+      |                               ^~~~~~~~~~~~~~~
+evmctl.c: In function 'main':
+evmctl.c:3163:33: error: implicit declaration of function 'imaevm_read_keyid' [-Wimplicit-function-declaration]
+ 3163 |                         keyid = imaevm_read_keyid(optarg);
+      |                                 ^~~~~~~~~~~~~~~~~
+evmctl.c: At top level:
+evmctl.c:1737:13: warning: 'set_bank_info' defined but not used [-Wunused-function]
+ 1737 | static void set_bank_info(struct tpm_bank_info *bank, const char *algo_name)
+      |             ^~~~~~~~~~~~~
+/usr/lib/gcc/x86_64-pc-linux-gnu/14/../../../../x86_64-pc-linux-gnu/bin/ld: cannot find evmctl.o: No such file or directory
+collect2: error: ld returned 1 exit status
+strip: 'evmctl': No such file
+Completed compiling. evmctl

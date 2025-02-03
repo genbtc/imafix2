@@ -1,5 +1,5 @@
 /*
- * ima-evm-utils - imafix2 mod by genBTC 2021 + 2022
+ * ima-evm-utils - imafix2 mod by genBTC 2021 + 2022 + 2025
  *
 */ 
 #include <sys/types.h>
@@ -17,7 +17,7 @@
 #include <linux/xattr.h>
 #include <getopt.h>
 #include <keyutils.h>
-#include <ctype.h>
+//#include <ctype.h>
 #include <termios.h>
 #include <assert.h>
 #include <asm/byteorder.h>
@@ -171,7 +171,7 @@ static int get_file_type(const char *path, const char *search_type)
 		case 's':
 			dts |= BLK_MASK | CHR_MASK | LNK_MASK; break;
 		case 'm':
-			/* stay within the same filesystem*/
+			/* Always Stay within the same filesystem */
 			err = lstat(path, &st);
 			if (err < 0) {
 				log_err("Failed to stat: %s\n", path);
@@ -220,69 +220,42 @@ static int cmd_imafix2(struct command *cmd_function)
 
 static int imafix2(const char *path)
 {
-	int size, len, err, digestlen = 0, ima = 0;
+	int size, len, err, digestlen, ima = 0;
 	char listbuf[1024];
-	const char *key;
 	uint8_t xattr_value[MAX_SIGNATURE_SIZE] = {0};
 	uint8_t xdigest[MAX_DIGEST_SIZE] = {0};
 	struct signature_v2_hdr *hdr;
-//	uint32_t keyid;
 	uint16_t sig_size = 0;
 
 	/* re-measuring takes some time, but
-	 * in some cases we can skip labeling if xattrs exists
-	*/
+	 * in some cases we can skip labeling if xattrs exists */
 	size = llistxattr(path, listbuf, sizeof(listbuf));
 	if (size < 0) {
 		log_errno("BUG: llistxattr() read list of xattrs failed!: %s\n", path);
 		return -1;
 	}
+//Search for security.ima existence
 	ima = find_xattr(listbuf, size, xattr_ima);
-
 	if (ima) {
-//		if (imaevm_params.verbose > LOG_INFO)
-//			log_info("IMA Found: %s\n", path);
+		//if (imaevm_params.verbose > LOG_DEBUG)
+		//	log_info("IMA Found: %s\n", path);
 		len = lgetxattr(path, xattr_ima, xattr_value, sizeof(xattr_value));
 		if (len < 0) {
 			log_errno("BUG: getxattr() on security.ima failed!: %s\n", path);
 			return len;
 		}
-		//xattr_value[0]; 03 = evm_ima_xattr_type=EVM_IMA_XATTR_DIGSIG
-		if (xattr_value[0] == EVM_IMA_XATTR_DIGSIG) {
-			//(DIGSIG attribute, with 0206 = sigv2,SHA512)
-			hdr = (struct signature_v2_hdr *)&xattr_value[1];
-/*
-			xattr_value[1]; hdr->
-			 version hash_algo keyid sig_size sig
-			   02       06   hexkeyid  hexlen
-			02 = digsig_version=DIGSIG_VERSION_2
-			06 = pkey_hash_algo=PKEY_HASH_SHA512
-			hexkeyid = ab6f2050 (IMA keyid: last 8 chars of cert serial)
-			hexlen = 0x0200=(512 in dec)
-			//these last two we have to bswap for some reason:
-			//keyid = __builtin_bswap32(hdr->keyid); */
-			sig_size = __builtin_bswap16(hdr->sig_size);
-		}
-/* 		if (imaevm_params.verbose > LOG_INFO) {
-			log_info("DIGSIG %d, HASH_ALGO %d, ", hdr->version, hdr->hash_algo);
-			log_info("HEXKEYID %02x, hexlen %02x \n", keyid, sig_size);
-			log_info("dump contents of security.ima: %d bytes\n", sig_size);
-			log_dump(hdr->sig, sig_size);
-		}
-*/		// here means it must be a HASH. continue...:
-
-
+//IMA-DIGEST-NG digest hash 
 		digestlen = ima_calc_hash(path, xdigest);
 		if (digestlen <= 1) {
-			log_err("BUG: ima_calc_hash() failed!: %d\n", digestlen);
+			log_err("imafix2() - BUG: ima_calc_hash() failed!: %d\n", digestlen);
 			return digestlen;
 		}
-		//assert(digestlen <= sizeof(xdigest));
+		// it must be a HASH. continue...
 		if (imaevm_params.verbose > LOG_INFO) {
 			log_info("ReCalc'dHash: ");
 			log_dump(xdigest, digestlen);
 		}
-		//verify hash match
+		// Verify hash match
 		//TODO: Files saved as other SHA algorithms need a different recalc
 		if (xattr_value[0] == IMA_XATTR_DIGEST_NG &&
 		    xattr_value[1] == PKEY_HASH_SHA512 ) {
@@ -291,68 +264,77 @@ static int imafix2(const char *path)
 				memcmp(&xattr_value[2], xdigest, digestlen) == 0) {
 							//hash was OK
 				if (imaevm_params.verbose > LOG_INFO)
-					log_info("Verified OK! IMA-DIGEST-NG digest hash matches!\n");
+					log_info("Verified OK! IMA-DIGEST-NG Hash Digest matches!\n");
 				return 0;	//redundant, control flows to end of function next anyway
 			}
 			else {
-				//bad hash. removexattr and redo it. (shortcut just write hash over it)
-				if (imaevm_params.verbose >= LOG_INFO) {
-					if (cwd)
-						log_info("HASHFAIL: %s/%s \n", cwd,path);
-					else
-						log_info("HASHFAIL: %s \n", path);
-				}
+				//Bad Hash. removexattr and redo it. (shortcut just write hash over it)
+				if (imaevm_params.verbose >= LOG_INFO)
+					log_info("HASHFAIL: %s%s%s \n", cwd ? cwd : "", cwd ? "/" : "", path);
 				if (imaevm_params.verbose > LOG_INFO)
-					log_err("IMA-DIGEST-NG hash Verify Failed!\n");
-				//return -1;
-				//TODO: but continue on and fix the hash if its a dir. (for now, for my application)
+					log_err("IMA-DIGEST-NG Hash Verify Failed!\n");
+				//Commit-New-Hash
 				err = hash_ima(path);
 				if (err && imaevm_params.verbose >= LOG_INFO)
-					log_err("Verify-Hash failed, and then Commit-New-Hash failed also! error=%d\n", err);
+					log_err("IMA-DIGEST-NG Verify-Hash failed, and then Commit-New-Hash failed also! error=%d\n", err);
 				return err;
 			}
 		//if ima = -1. no digest (then its a signature, we can verify_sign on it)
-		//verify signature match
 		}
+//Verify Signature matches		
 		else if (xattr_value[0] == EVM_IMA_XATTR_DIGSIG) {
+			//xattr_value[0]; 03 = evm_ima_xattr_type=EVM_IMA_XATTR_DIGSIG
+			//if (xattr_value[0] == EVM_IMA_XATTR_DIGSIG) {
+				//(DIGSIG attribute, with 0206 = sigv2,SHA512)
+				hdr = (struct signature_v2_hdr *)&xattr_value[1];
+				sig_size = __builtin_bswap16(hdr->sig_size);
+			//}
+			/*	xattr_value[1]; hdr->
+				version hash_algo keyid sig_size sig
+				02       06   hexkeyid  hexlen
+				02 = digsig_version=DIGSIG_VERSION_2
+				06 = pkey_hash_algo=PKEY_HASH_SHA512
+				hexkeyid = ab6f2050 (IMA keyid: last 8 chars of cert serial)
+				hexlen = 0x0200=(512 in dec)
+				//these last two we have to bswap for some reason:
+				//keyid = __builtin_bswap32(hdr->keyid);
+				sig_size = __builtin_bswap16(hdr->sig_size);
+			} 
+	 		if (imaevm_params.verbose > LOG_DEBUG) {
+				log_info("DIGSIG %d, HASH_ALGO %d, ", hdr->version, hdr->hash_algo);
+				log_info("HEXKEYID %02x, hexlen %02x \n", keyid, sig_size);
+				log_info("dump contents of security.ima: %d bytes\n", sig_size);
+				log_dump(hdr->sig, sig_size);
+			} */
+			//Verify Sig
 			ima = ima_verify_signature(path, xattr_value, 9+sig_size, xdigest, digestlen);
 			if (ima==0) {
 				if (imaevm_params.verbose > LOG_INFO)
-					log_info("Verified OK! IMA-DIGSIGv2 digest hash matches!\n");
+					log_info("Verified OK! IMA-DIGSIGv2 Signature matches!\n");
 				return 0;
 			}
 			else {
-				if (imaevm_params.verbose >= LOG_INFO) {
-					if (cwd)
-						log_info("SIGNFAIL: %s/%s \n", cwd,path);
-					else
-						log_info("SIGNFAIL: %s \n", path);
-				}
+				if (imaevm_params.verbose >= LOG_INFO)
+					log_info("SIGNFAIL: %s%s%s \n", cwd ? cwd : "", cwd ? "/" : "", path);
 				if (imaevm_params.verbose > LOG_INFO)
-					log_err("IMA-DIGSIGN hash Verify failed!");// error=%d\n", ima);
+					log_err("IMA-DIGSIGv2 Signature Verify failed (%d)!\n", ima);
 				return 1;
 			}
 		//if ima = -1. no signature (then we failed and the thing is corrupt)
 		}
 		else
-			log_err("BUG: imafix2() - Something Else Bad Happened, wrong Hash Algo, or Data is unreadable. ABORT!\n");
+			log_err("imafix2() - WrongHash Algo, Data is Unrecognizable, or worse. ABORT!\n");
 	}
 	else {
-		log_info("IMA(fixhash): %s\n", path);
-	//Manual mode:
+	//Default path:
+		log_info("imafix2(name): %s\n", path);
+		//caution in case user mis-selects, choosing neither means choose sig
 		if (!digsig && !digest)
 			digsig = 1;
-		if (digsig) {
-			key = imaevm_params.keyfile ? : PERSONAL_PRIVATE_KEY;
-			err = sign_ima(path, key);
-			if (err)
-				return err;
-		}
-		else if (digest) {
-			err = hash_ima(path);
-			if (err)
-				return err;
-		}
+		if (digsig)
+			return sign_ima(path, imaevm_params.keyfile ? : PERSONAL_PRIVATE_KEY);
+		else if (digest)
+			return hash_ima(path);
 	}
 	return 0;
 }
@@ -523,7 +505,7 @@ int main(int argc, char *argv[])
 			recursive = 1;
 			break;
 		case 129:
-			printf("imafix2 version %s\n", VERSION);
+			printf("imafix2 version %s\n", VERSION); //config.h
 			exit(0);
 			break;
 		default:

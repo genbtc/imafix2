@@ -1,0 +1,10 @@
+genr8eofl@genr8too ~/src/imafix2/src $ readelf -sWC  libimaevm.o | grep ima
+     1: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS libimaevm.c
+   111: 0000000000000000    48 OBJECT  GLOBAL DEFAULT   14 imaevm_params
+   118: 0000000000000150   117 FUNC    GLOBAL DEFAULT    1 imaevm_do_hexdump
+   120: 00000000000001d0   100 FUNC    GLOBAL DEFAULT    1 imaevm_hexdump
+   122: 0000000000000240    87 FUNC    GLOBAL DEFAULT    1 imaevm_hash_algo_by_id
+   123: 00000000000002a0  1792 FUNC    GLOBAL DEFAULT    1 ima_calc_hash
+   158: 0000000000000e80   135 FUNC    GLOBAL DEFAULT    1 imaevm_get_hash_algo
+   160: 0000000000000f10    70 FUNC    GLOBAL DEFAULT    1 imaevm_hash_algo_from_sig
+   170: 0000000000001310   845 FUNC    GLOBAL DEFAULT    1 ima_verify_signature

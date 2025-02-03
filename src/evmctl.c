@@ -69,8 +69,8 @@
 #include <openssl/engine.h>
 #endif
 #include <openssl/x509v3.h>
-#include "hash_info.h"
-#include "pcr.h"
+#include <linux/hash_info.h>
+//#include "pcr.h"  //included in imaevm.h commented out
 #include "utils.h"
 
 #ifndef XATTR_APPAARMOR_SUFFIX
@@ -1764,8 +1764,9 @@ static struct tpm_bank_info *init_tpm_banks(int *num_banks)
 	*num_banks = num_algos;
 	for (i = 0; i < num_algos; i++) {
 		for (j = 0; j < HASH_ALGO__LAST; j++) {
-			if (!strcmp(default_algos[i], hash_algo_name[j]))
-				set_bank_info(&banks[i], hash_algo_name[j]);
+//genr8 commented out
+//			if (!strcmp(default_algos[i], hash_algo_name[j]))
+//				set_bank_info(&banks[i], hash_algo_name[j]);
 		}
 		assert(banks[i].algo_name);
 	}
@@ -2818,7 +2819,7 @@ static void usage(void)
 
 	printf(
 		"\n"
-		"  -a, --hashalgo     sha1, sha224, sha256, sha384, sha512, streebog256, streebog512 (default: %s)\n"
+		"  -a, --hashalgo     sha1, sha224, sha256, sha384, sha512, streebog256, streebog512 (default: sha512)\n"
 		"  -s, --imasig       make IMA signature\n"
 		"      --veritysig    sign an fs-verity file digest hash\n"
 		"  -d, --imahash      make IMA hash\n"
@@ -2861,7 +2862,7 @@ static void usage(void)
 		"\n"
 		"Environment variables:\n\n"
 		"EVMCTL_KEY_PASSWORD  : Private key password to use; do not use --pass option\n"
-		"\n", DEFAULT_HASH_ALGO);
+		"\n");
 }
 
 struct command cmds[] = {

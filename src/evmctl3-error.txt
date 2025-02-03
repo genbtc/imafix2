@@ -1,0 +1,40 @@
+genr8eofl@genr8too ~/src/imafix2/src $ ./evmctl2.make 
+evmctl.c: In function 'cmd_sign_hash':
+evmctl.c:838:31: error: implicit declaration of function 'calc_hash_sigv3' [-Wimplicit-function-declaration]
+  838 |                         ret = calc_hash_sigv3(IMA_VERITY_DIGSIG, algo, hash,
+      |                               ^~~~~~~~~~~~~~~
+evmctl.c:838:47: error: 'IMA_VERITY_DIGSIG' undeclared (first use in this function)
+  838 |                         ret = calc_hash_sigv3(IMA_VERITY_DIGSIG, algo, hash,
+      |                                               ^~~~~~~~~~~~~~~~~
+evmctl.c:838:47: note: each undeclared identifier is reported only once for each function it appears in
+evmctl.c:849:34: error: 'DIGSIG_VERSION_3' undeclared (first use in this function); did you mean 'DIGSIG_VERSION_2'?
+  849 |                         sig[1] = DIGSIG_VERSION_3;      /* sigv3 */
+      |                                  ^~~~~~~~~~~~~~~~
+      |                                  DIGSIG_VERSION_2
+evmctl.c: In function 'ima_measurement':
+evmctl.c:2302:50: error: 'MAX_TEMPLATE_SIZE' undeclared (first use in this function)
+ 2302 |                             entry.template_len > MAX_TEMPLATE_SIZE) {
+      |                                                  ^~~~~~~~~~~~~~~~~
+evmctl.c: In function 'usage':
+evmctl.c:2864:23: error: 'DEFAULT_HASH_ALGO' undeclared (first use in this function)
+ 2864 |                 "\n", DEFAULT_HASH_ALGO);
+      |                       ^~~~~~~~~~~~~~~~~
+evmctl.c: In function 'main':
+evmctl.c:3159:39: error: 'struct libimaevm_params' has no member named 'keyid'; did you mean 'keyfile'?
+ 3159 |                         imaevm_params.keyid = keyid;
+      |                                       ^~~~~
+      |                                       keyfile
+evmctl.c:3162:33: error: implicit declaration of function 'imaevm_read_keyid' [-Wimplicit-function-declaration]
+ 3162 |                         keyid = imaevm_read_keyid(optarg);
+      |                                 ^~~~~~~~~~~~~~~~~
+evmctl.c:3167:39: error: 'struct libimaevm_params' has no member named 'keyid'; did you mean 'keyfile'?
+ 3167 |                         imaevm_params.keyid = keyid;
+      |                                       ^~~~~
+      |                                       keyfile
+evmctl.c:3187:26: error: 'struct libimaevm_params' has no member named 'eng'
+ 3187 |             imaevm_params.eng == NULL &&
+      |                          ^
+evmctl.c:3192:35: error: 'struct libimaevm_params' has no member named 'eng'
+ 3192 |                 if (!imaevm_params.eng)
+      |                                   ^
+/usr/lib/gcc/x86_64-pc-linux-gnu/14/../../../../x86_64-pc-linux-gnu/bin/ld: cannot find evmctl.o: No such file or directory

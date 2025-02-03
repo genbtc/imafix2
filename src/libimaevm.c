@@ -50,7 +50,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <assert.h>
-#include <ctype.h>
+//#include <ctype.h>
 
 #include <openssl/crypto.h>
 #include <openssl/pem.h>
@@ -59,7 +59,7 @@
 #include <openssl/err.h>
 
 #include "imaevm.h"
-#include "hash_info.h"
+#include <linux/hash_info.h>
 
 /* Names that are primary for OpenSSL. */
 static const char *const pkey_hash_algo[PKEY_HASH__LAST] = {
@@ -110,8 +110,8 @@ const char *imaevm_hash_algo_by_id(int algo)
 {
 	if (algo < PKEY_HASH__LAST)
 		return pkey_hash_algo[algo];
-	if (algo < HASH_ALGO__LAST)
-		return hash_algo_name[algo];
+	// if (algo < HASH_ALGO__LAST)
+	// 	return hash_algo_name[algo];
 
 	log_err("digest %d not found\n", algo);
 	return NULL;
@@ -365,7 +365,7 @@ RSA *read_pub_key(const char *keyfile, int x509)
 	pkey = read_pub_pkey(keyfile, x509);
 	if (!pkey)
 		return NULL;
-	key = EVP_PKEY_get1_RSA(pkey);
+	key = EVP_PKEY_get1_RSA(pkey);	//deprecated
 	EVP_PKEY_free(pkey);
 	if (!key) {
 		log_err("read_pub_key: unsupported key type\n");
@@ -391,14 +391,14 @@ static int verify_hash_v1(const char *file, const unsigned char *hash, int size,
 	key = read_pub_key(keyfile, 0);
 	if (!key)
 		return 1;
-
+	//deprecated
 	SHA1_Init(&ctx);
 	SHA1_Update(&ctx, hash, size);
 	SHA1_Update(&ctx, hdr, sizeof(*hdr));
 	SHA1_Final(sighash, &ctx);
 	log_info("sighash: ");
 	log_dump(sighash, sizeof(sighash));
-
+	//deprecated
 	err = RSA_public_decrypt(siglen - sizeof(*hdr) - 2, sig + sizeof(*hdr) + 2, out, key, RSA_PKCS1_PADDING);
 	RSA_free(key);
 	if (err < 0) {
@@ -569,11 +569,11 @@ int imaevm_get_hash_algo(const char *algo)
 		    !strcmp(algo, pkey_hash_algo_kern[i]))
 			return i;
 
-	/* iterate over algorithms provided by kernel-headers */
-	for (i = 0; i < HASH_ALGO__LAST; i++)
-		if (hash_algo_name[i] &&
-		    !strcmp(algo, hash_algo_name[i]))
-			return i;
+	// /* iterate over algorithms provided by kernel-headers */
+	// for (i = 0; i < HASH_ALGO__LAST; i++)
+	// 	if (hash_algo_name[i] &&
+	// 	    !strcmp(algo, hash_algo_name[i]))
+	// 		return i;
 
 	return -1;
 }
@@ -783,7 +783,7 @@ static RSA *read_priv_key(const char *keyfile, const char *keypass)
 	pkey = read_priv_pkey(keyfile, keypass);
 	if (!pkey)
 		return NULL;
-	key = EVP_PKEY_get1_RSA(pkey);
+	key = EVP_PKEY_get1_RSA(pkey);	//deprecated
 	EVP_PKEY_free(pkey);
 	if (!key) {
 		log_err("read_priv_key: unsupported key type\n");
@@ -861,14 +861,14 @@ static int sign_hash_v1(const char *hashalgo, const unsigned char *hash,
 	calc_keyid_v1(hdr->keyid, name, pub, len);
 
 	hdr->nmpi = 1;
-
+	//deprecated
 	SHA1_Init(&ctx);
 	SHA1_Update(&ctx, hash, size);
 	SHA1_Update(&ctx, hdr, sizeof(*hdr));
 	SHA1_Final(sighash, &ctx);
 	log_info("sighash: ");
 	log_dump(sighash, sizeof(sighash));
-
+	//deprecated
 	len = RSA_private_encrypt(sizeof(sighash), sighash, sig + sizeof(*hdr) + 2, key, RSA_PKCS1_PADDING);
 	if (len < 0) {
 		log_err("RSA_private_encrypt() failed: %d\n", len);
@@ -955,10 +955,10 @@ static int sign_hash_v2(const char *algo, const unsigned char *hash,
 	if (!EVP_PKEY_CTX_set_signature_md(ctx, md))
 		goto err;
 
-	if (imaevm_params.verbose > LOG_INFO) {
-		log_info("hash size: (%d)\n", size);
-		log_info("sig max size: (%lu) \nsignature: ", sigsize); //1024-8-1=1015
-	}
+	// if (imaevm_params.verbose > LOG_INFO) {
+	// 	log_info("hash size: (%d)\n", size);
+	// 	log_info("sig max size: (%lu) \nsignature: ", sigsize); //1024-8-1=1015
+	// }
 
 	st = "EVP_PKEY_sign";
 	if (!EVP_PKEY_sign(ctx, hdr->sig, &sigsize, hash, size))
@@ -970,12 +970,12 @@ static int sign_hash_v2(const char *algo, const unsigned char *hash,
 	/* we add bit length of the signature to make it gnupg compatible */
 	hdr->sig_size = __cpu_to_be16(len);
 	len += sizeof(*hdr);
-	log_debug("evm/ima signature: %d bytes to be written\n", len);
-
+	
     if (imaevm_params.verbose > LOG_INFO) {
         log_info("header: ");
         log_dump(hdr, sizeof(struct signature_v2_hdr));
     }
+	log_debug("evm/ima signature: %d bytes to be written\n", len);
 
 err:
 	if (len == -1) {
