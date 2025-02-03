@@ -2,4 +2,4 @@
 FORKED FROM https://github.com/linux-integrity/ima-evm-utils
 config.h generated from:
 ./configure --prefix=/usr --build=x86_64-pc-linux-gnu --host=x86_64-pc-linux-gnu --mandir=/usr/share/man --infodir=/usr/share/info --datadir=/usr/share --sysconfdir=/etc --localstatedir=/var/lib --datarootdir=/usr/share --disable-dependency-tracking --disable-silent-rules --disable-static --docdir=/usr/share/doc/ima-evm-utils-9999 --htmldir=/usr/share/doc/ima-evm-utils-9999/html --with-sysroot=/ --libdir=/usr/lib64 --disable-debug --without-pcrtss --with-default-hash=sha512
-c
+Requires OpenSSL
