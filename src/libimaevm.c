@@ -736,7 +736,7 @@ void calc_keyid_v2(uint32_t *keyid, char *str, EVP_PKEY *pkey)
 	if (X509_PUBKEY_set(&pk, pkey) &&
 	    X509_PUBKEY_get0_param(NULL, &public_key, &len, NULL, pk)) {
 
-		log_debug("dump public_key: ");
+		log_debug("dump public_key len(%d): ",len);		//526
 		log_debug_dump(public_key, len);
 
 		uint8_t sha1[SHA_DIGEST_LENGTH];
@@ -744,7 +744,7 @@ void calc_keyid_v2(uint32_t *keyid, char *str, EVP_PKEY *pkey)
 		/* sha1[16 - 19] is exactly keyid from gpg file */
 		memcpy(keyid, sha1 + 16, 4);
 
-		log_debug("SHA1 public_key: ");
+		log_debug("public_key^SHA1: ");
 		log_debug_dump(sha1, SHA_DIGEST_LENGTH);
 	} else
 		*keyid = 0;
@@ -970,11 +970,10 @@ static int sign_hash_v2(const char *algo, const unsigned char *hash,
 	len += sizeof(*hdr);
 	
     //if (imaevm_params.verbose > LOG_INFO) {
-        log_debug("header: ");
-        log_debug_dump(hdr, sizeof(struct signature_v2_hdr));
-		log_debug("signature: ");
-		log_debug_dump(&hdr->sig, sigsize);
-    //}
+	log_debug("header: ");
+	log_debug_dump(hdr, sizeof(struct signature_v2_hdr));
+	log_debug("signature: ");
+	log_debug_dump(&hdr->sig, sigsize);
 	log_debug("evm/ima signature: %d bytes to be written\n", len);
 
 err:
