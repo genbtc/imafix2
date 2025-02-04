@@ -318,7 +318,8 @@ static int imafix2(const char *path)
 					log_info("SIGNFAIL: %s%s%s \n", cwd ? cwd : "", cwd ? "/" : "", path);
 				if (imaevm_params.verbose > LOG_INFO)
 					log_err("IMA-DIGSIGv2 Signature Verify failed (%d)!\n", ima);
-				return 1;
+				if (imaevm_params.force)
+    				goto sign;
 			}
 		//if ima = -1. no signature (then we failed and the thing is corrupt)
 		}
@@ -327,6 +328,7 @@ static int imafix2(const char *path)
 	}
 	else {
 	//Default path:
+sign:
 		log_info("imafix2(name): %s\n", path);
 		//caution in case user mis-selects, choosing neither means choose sig
 		if (!digsig && !digest)
@@ -436,6 +438,7 @@ static void usage(void)
 		"  -a, --hashalgo     sha512(default), sha1, sha224, sha256, sha384, md5, streebog, ripe-md, wp, tgr, etc\n"
 		"  -s, --imasig       make IMA signature(default)\n"
 		"  -d, --imahash      make IMA hash\n"
+		"  -f, --force        force IMA sign, even when verification fails\n"
 		"  -k, --key          path to signing key (defaults: /etc/keys/signing_key.x509 & /etc/keys/signing_key.priv )\n"
 		"  -r, --recursive    recurse sub-directories\n"
 		"  -t, --type         filter search by type: -t 'fdsm'\n"
@@ -454,13 +457,14 @@ struct command cmds[] = {
 };
 
 static struct option opts[] = {
-	{"help", 0, 0, 'h'},
+	{"hashalgo", 1, 0, 'a'},
 	{"imasig", 0, 0, 's'},
 	{"imahash", 0, 0, 'd'},
-	{"hashalgo", 1, 0, 'a'},
+	{"force", 0, 0, 'f'},
 	{"key", 1, 0, 'k'},
-	{"type", 1, 0, 't'},
 	{"recursive", 0, 0, 'r'},
+	{"type", 1, 0, 't'},
+	{"help", 0, 0, 'h'},
 	{"version", 0, 0, 129},
 	{}
 
@@ -474,7 +478,7 @@ int main(int argc, char *argv[])
 	g_argc = argc;
 
 	while (1) {
-		c = getopt_long(argc, argv, "hvdsa:k:t:r", opts, &lind);
+		c = getopt_long(argc, argv, "fhvdsa:k:t:r", opts, &lind);
 		if (c == -1)
 			break;
 
@@ -492,6 +496,9 @@ int main(int argc, char *argv[])
 		case 's':
 			digsig = 1;
 			break;
+        case 'f':
+            imaevm_params.force = 1;
+            break;
 		case 'a':
 			imaevm_params.hash_algo = optarg;
 			break;

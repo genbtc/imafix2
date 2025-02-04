@@ -220,6 +220,7 @@ struct signature_v2_hdr {
 } __packed;
 
 struct libimaevm_params {
+    int force;
 	int verbose;
 	int x509;
 	const char *hash_algo;
