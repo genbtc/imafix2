@@ -1,5 +1,5 @@
 /*
- * ima-evm-utils - imafix2 mod by genBTC 2021 + 2022 + 2025
+ * imafix2 (fork off ima-evm-utils) by genBTC 2021 + 2022 + 2025
  *
 */ 
 #include <sys/types.h>
@@ -192,7 +192,7 @@ static int do_cmd(struct command *cmd, find_cb_t cmd_function)
 
 	if (!path) {
 		usage();
-		log_err("Parameters missing -\n");
+		log_err("Path Parameter missing -\n");
 		print_usage(cmd);
 		return -1;
 	}
@@ -229,22 +229,21 @@ static int imafix2(const char *path)
 
 	/* re-measuring takes some time, but
 	 * in some cases we can skip labeling if xattrs exists */
+    if ((path == NULL) || (path[0] == '\0')) return 0;
 	size = llistxattr(path, listbuf, sizeof(listbuf));
-	if (size < 0) {
-		log_errno("BUG: llistxattr() read list of xattrs failed!: %s\n", path);
+	if (size < 0) { //Spam
+		//log_errno("BUG: llistxattr() read list of xattrs failed!: %s\n", path);
 		return -1;
 	}
 //Search for security.ima existence
 	ima = find_xattr(listbuf, size, xattr_ima);
 	if (ima) {
-		//if (imaevm_params.verbose > LOG_DEBUG)
-		//	log_info("IMA Found: %s\n", path);
 		len = lgetxattr(path, xattr_ima, xattr_value, sizeof(xattr_value));
 		if (len < 0) {
 			log_errno("BUG: getxattr() on security.ima failed!: %s\n", path);
 			return len;
 		}
-//IMA-DIGEST-NG digest hash 
+//IMA-DIGEST-NG Verify digest hash
 		digestlen = ima_calc_hash(path, xdigest);
 		if (digestlen <= 1) {
 			log_err("imafix2() - BUG: ima_calc_hash() failed!: %d\n", digestlen);
@@ -261,34 +260,30 @@ static int imafix2(const char *path)
 		    xattr_value[1] == PKEY_HASH_SHA512 ) {
 			//(DIGEST_NG attribute always starts with 0406 for SHA512)
 			if (digestlen == sizeof(xdigest) &&
-				memcmp(&xattr_value[2], xdigest, digestlen) == 0) {
-							//hash was OK
+				memcmp(&xattr_value[2], xdigest, digestlen) == 0) { //hash was OK
 				if (imaevm_params.verbose > LOG_INFO)
 					log_info("Verified OK! IMA-DIGEST-NG Hash Digest matches!\n");
-				return 0;	//redundant, control flows to end of function next anyway
 			}
 			else {
 				//Bad Hash. removexattr and redo it. (shortcut just write hash over it)
-				if (imaevm_params.verbose >= LOG_INFO)
-					log_info("HASHFAIL: %s%s%s \n", cwd ? cwd : "", cwd ? "/" : "", path);
+				log_info("HASHFAIL: %s%s%s \n", cwd ? cwd : "", cwd ? "/" : "", path);
 				if (imaevm_params.verbose > LOG_INFO)
 					log_err("IMA-DIGEST-NG Hash Verify Failed!\n");
-				//Commit-New-Hash
-				err = hash_ima(path);
-				if (err && imaevm_params.verbose >= LOG_INFO)
-					log_err("IMA-DIGEST-NG Verify-Hash failed, and then Commit-New-Hash failed also! error=%d\n", err);
-				return err;
+				if (imaevm_params.force) {
+    				//Commit-New-Hash
+    				err = hash_ima(path);
+    				if (err && imaevm_params.verbose >= LOG_INFO)
+    					log_err("IMA-DIGEST-NG Verify-Hash failed, and then Commit-New-Hash failed also! error=%d\n", err);
+    				return err;
+                }
 			}
 		//if ima = -1. no digest (then its a signature, we can verify_sign on it)
 		}
-//Verify Signature matches		
+//IMA-DIGSIGv2 Verify Signature matches     (0x03)
 		else if (xattr_value[0] == EVM_IMA_XATTR_DIGSIG) {
-			//xattr_value[0]; 03 = evm_ima_xattr_type=EVM_IMA_XATTR_DIGSIG
-			//if (xattr_value[0] == EVM_IMA_XATTR_DIGSIG) {
-				//(DIGSIG attribute, with 0206 = sigv2,SHA512)
-				hdr = (struct signature_v2_hdr *)&xattr_value[1];
-				sig_size = __builtin_bswap16(hdr->sig_size);
-			//}
+			//(DIGSIG attribute, with 0206 = sigv2,SHA512)
+			hdr = (struct signature_v2_hdr *)&xattr_value[1];
+			sig_size = __builtin_bswap16(hdr->sig_size);
 			/*	xattr_value[1]; hdr->
 				version hash_algo keyid sig_size sig
 				02       06   hexkeyid  hexlen
@@ -299,7 +294,7 @@ static int imafix2(const char *path)
 				//these last two we have to bswap for some reason:
 				//keyid = __builtin_bswap32(hdr->keyid);
 				sig_size = __builtin_bswap16(hdr->sig_size);
-			} 
+			}
 	 		if (imaevm_params.verbose > LOG_DEBUG) {
 				log_info("DIGSIG %d, HASH_ALGO %d, ", hdr->version, hdr->hash_algo);
 				log_info("HEXKEYID %02x, hexlen %02x \n", keyid, sig_size);
@@ -314,12 +309,11 @@ static int imafix2(const char *path)
 				return 0;
 			}
 			else {
-				if (imaevm_params.verbose >= LOG_INFO)
-					log_info("SIGNFAIL: %s%s%s \n", cwd ? cwd : "", cwd ? "/" : "", path);
+				log_info("SIGNFAIL: %s%s%s \n", cwd ? cwd : "", cwd ? "/" : "", path);
 				if (imaevm_params.verbose > LOG_INFO)
 					log_err("IMA-DIGSIGv2 Signature Verify failed (%d)!\n", ima);
 				if (imaevm_params.force)
-    				goto sign;
+    				goto sign;  //Commit new Signature
 			}
 		//if ima = -1. no signature (then we failed and the thing is corrupt)
 		}
@@ -370,6 +364,7 @@ static int find(const char *path, int dts, find_cb_t cmd_function)
 	}
 
 	cwd = getcwd(dirbuf, sizeof(dirbuf));
+    if (cwd[0] == '\0') log_info("CWD 1 was \\0 (null-terminator)!");
 	//log_debug("cwd: %s/ \n", cwd);
 
 	while ((de = readdir(dir))) {
@@ -388,6 +383,7 @@ static int find(const char *path, int dts, find_cb_t cmd_function)
 	}
 
 	cwd = getcwd(dirbuf, sizeof(dirbuf));
+    if (cwd[0] == '\0') log_info("CWD 2 was \\0 (null-terminator)!");
 	//log_debug("cwd: %s/ \n", cwd);
 
 	if (dts & DIR_MASK)
@@ -435,11 +431,11 @@ static void usage(void)
 	print_all_usage(cmds);
 	printf(
 		"\n"
+		"  -k, --key          path to signing key (defaults: /etc/keys/signing_key.x509 & /etc/keys/signing_key.priv )\n"
 		"  -a, --hashalgo     sha512(default), sha1, sha224, sha256, sha384, md5, streebog, ripe-md, wp, tgr, etc\n"
 		"  -s, --imasig       make IMA signature(default)\n"
 		"  -d, --imahash      make IMA hash\n"
-		"  -f, --force        force IMA sign, even when verification fails\n"
-		"  -k, --key          path to signing key (defaults: /etc/keys/signing_key.x509 & /etc/keys/signing_key.priv )\n"
+		"  -f, --force        force IMA sign (after SIGNFAILs)\n"
 		"  -r, --recursive    recurse sub-directories\n"
 		"  -t, --type         filter search by type: -t 'fdsm'\n"
 		"                     f: Files(default), d: Directory, s: block/char/Symlink\n"
