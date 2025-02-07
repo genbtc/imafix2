@@ -1,6 +1,8 @@
 #the binary itself
 src/imafix2
 src/evmctl
+#Tests
+testA.*
 
 # Prerequisites
 *.d

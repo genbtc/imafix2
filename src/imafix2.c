@@ -273,7 +273,7 @@ static int imafix2(const char *path)
     				//Commit-New-Hash
     				err = hash_ima(path);
     				if (err && imaevm_params.verbose >= LOG_INFO)
-    					log_err("IMA-DIGEST-NG Verify-Hash failed, and then Commit-New-Hash failed also! error=%d\n", err);
+    					log_err("IMA-DIGEST-NG Verify-Hash Failed, and then Commit-New-Hash Failed also! error=%d\n", err);
     				return err;
                 }
 			}
@@ -311,7 +311,7 @@ static int imafix2(const char *path)
 			else {
 				log_info("SIGNFAIL: %s%s%s \n", cwd ? cwd : "", cwd ? "/" : "", path);
 				if (imaevm_params.verbose > LOG_INFO)
-					log_err("IMA-DIGSIGv2 Signature Verify failed (%d)!\n", ima);
+					log_err("IMA-DIGSIGv2 Signature Verify Failed (%d)!\n", ima);
 				if (imaevm_params.force)
     				goto sign;  //Commit new Signature
 			}
@@ -364,7 +364,7 @@ static int find(const char *path, int dts, find_cb_t cmd_function)
 	}
 
 	cwd = getcwd(dirbuf, sizeof(dirbuf));
-    if (cwd[0] == '\0') log_info("CWD 1 was \\0 (null-terminator)!");
+    //if (cwd[0] == '\0') log_info("CWD 1 was \\0 (null-terminator)!");
 	//log_debug("cwd: %s/ \n", cwd);
 
 	while ((de = readdir(dir))) {
@@ -383,7 +383,7 @@ static int find(const char *path, int dts, find_cb_t cmd_function)
 	}
 
 	cwd = getcwd(dirbuf, sizeof(dirbuf));
-    if (cwd[0] == '\0') log_info("CWD 2 was \\0 (null-terminator)!");
+    //if (cwd[0] == '\0') log_info("CWD 2 was \\0 (null-terminator)!");
 	//log_debug("cwd: %s/ \n", cwd);
 
 	if (dts & DIR_MASK)

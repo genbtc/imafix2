@@ -968,7 +968,7 @@ static int sign_hash_v2(const char *algo, const unsigned char *hash,
 	/* we add a "bit length" field to the signature (to make it gnupg compatible) */
 	hdr->sig_size = __cpu_to_be16(len);
 	len += sizeof(*hdr);
-	
+
     //if (imaevm_params.verbose > LOG_INFO) {
 	log_debug("header: ");
 	log_debug_dump(hdr, sizeof(struct signature_v2_hdr));
